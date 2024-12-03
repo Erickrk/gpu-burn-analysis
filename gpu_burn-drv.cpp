@@ -534,53 +534,83 @@ void listenClients(std::vector<int> clientFd, std::vector<pid_t> clientPid,
         // Printing progress (if a child has initted already)
         if (childReport) {
             float elapsed =
-                fminf((float)(thisTime - startTime) / (float)runTime * 100.0f,
-                      100.0f);
+            fminf((float)(thisTime - startTime) / (float)runTime * 100.0f,
+                  100.0f);
             printf("\r%.1f%%  ", elapsed);
             printf("proc'd: ");
             for (size_t i = 0; i < clientCalcs.size(); ++i) {
-                printf("%d (%.0f Gflop/s) ", clientCalcs.at(i),
-                       clientGflops.at(i));
-                if (i != clientCalcs.size() - 1)
-                    printf("- ");
+            printf("%d (%.0f Gflop/s) ", clientCalcs.at(i),
+                   clientGflops.at(i));
+            if (i != clientCalcs.size() - 1)
+                printf("- ");
             }
             printf("  errors: ");
             for (size_t i = 0; i < clientErrors.size(); ++i) {
-                std::string note = "%d ";
-                if (clientCalcs.at(i) == -1)
-                    note += " (DIED!)";
-                else if (clientErrors.at(i))
-                    note += " (WARNING!)";
+            std::string note = "%d ";
+            if (clientCalcs.at(i) == -1)
+                note += " (DIED!)";
+            else if (clientErrors.at(i))
+                note += " (WARNING!)";
 
-                printf(note.c_str(), clientErrors.at(i));
-                if (i != clientCalcs.size() - 1)
-                    printf("- ");
+            printf(note.c_str(), clientErrors.at(i));
+            if (i != clientCalcs.size() - 1)
+                printf("- ");
             }
             printf("  temps: ");
             for (size_t i = 0; i < clientTemp.size(); ++i) {
-                printf(clientTemp.at(i) != 0 ? "%d C " : "-- ",
-                       clientTemp.at(i));
-                if (i != clientCalcs.size() - 1)
-                    printf("- ");
+            printf(clientTemp.at(i) != 0 ? "%d C " : "-- ",
+                   clientTemp.at(i));
+            if (i != clientCalcs.size() - 1)
+                printf("- ");
             }
 
             fflush(stdout);
 
             for (size_t i = 0; i < clientErrors.size(); ++i)
-                if (clientErrors.at(i))
-                    clientFaulty.at(i) = true;
+            if (clientErrors.at(i))
+                clientFaulty.at(i) = true;
+
+            // Create the file if it doesn't exist
+            std::ifstream csvFileCheck("gpu_burn_log.csv");
+            bool fileExists = csvFileCheck.good();
+            csvFileCheck.close();
+
+            std::ofstream csvFile;
+            csvFile.open("gpu_burn_log.csv", std::ios_base::app);
+            if (!fileExists) {
+                csvFile << "ClientCalcs,Gflops,Temperature,Errors\n";
+            }
+
+            // Save to CSV file
+            for (size_t i = 0; i < clientCalcs.size(); ++i) {
+                csvFile << clientCalcs.at(i) << (i != clientCalcs.size() - 1 ? "," : "");
+            }
+            csvFile << ",";
+            for (size_t i = 0; i < clientGflops.size(); ++i) {
+                csvFile << clientGflops.at(i) << (i != clientGflops.size() - 1 ? "," : "");
+            }
+            csvFile << ",";
+            for (size_t i = 0; i < clientTemp.size(); ++i) {
+                csvFile << clientTemp.at(i) << (i != clientTemp.size() - 1 ? "," : "");
+            }
+            csvFile << ",";
+            for (size_t i = 0; i < clientErrors.size(); ++i) {
+                csvFile << clientErrors.at(i) << (i != clientErrors.size() - 1 ? "," : "\n");
+            }
+            csvFile.close();
 
             if (nextReport < elapsed) {
-                nextReport = elapsed + 10.0f;
-                printf("\n\tSummary at:   ");
-                fflush(stdout);
-                system("date"); // Printing a date
-                fflush(stdout);
-                printf("\n");
+            nextReport = elapsed + 10.0f;
+            printf("\n\tSummary at:   ");
+            fflush(stdout);
+            system("date"); // Printing a date
+            fflush(stdout);
+            printf("\n");
                 for (size_t i = 0; i < clientErrors.size(); ++i)
                     clientErrors.at(i) = 0;
+                }
             }
-        }
+
 
         // Checking whether all clients are dead
         bool oneAlive = false;
