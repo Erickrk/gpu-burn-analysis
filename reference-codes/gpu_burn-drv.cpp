@@ -29,12 +29,12 @@
 
 // Matrices are SIZE*SIZE..  POT should be efficiently implemented in CUBLAS
 #define SIZE 8192ul
-#define USEMEM 0.99 // Try to allocate 90% of memory
+#define USEMEM 0.9 // Try to allocate 90% of memory
 #define COMPARE_KERNEL "compare.ptx"
 
 // Used to report op/s, measured through Visual Profiler, CUBLAS from CUDA 7.5
 // (Seems that they indeed take the naive dim^3 approach)
-// #define OPS_PER_MUL 17188257792ul // Measured for SIZE = 2048
+//#define OPS_PER_MUL 17188257792ul // Measured for SIZE = 2048
 #define OPS_PER_MUL 1100048498688ul // Extrapolated for SIZE = 8192
 
 #include <algorithm>
@@ -45,7 +45,6 @@
 #include <exception>
 #include <fstream>
 #include <map>
-#include <regex>
 #include <signal.h>
 #include <stdexcept>
 #include <string.h>
@@ -57,10 +56,9 @@
 #include <time.h>
 #include <unistd.h>
 #include <vector>
+#include <regex>
 
-#define SIGTERM_TIMEOUT_THRESHOLD_SECS                                         \
-    30 // number of seconds for sigterm to kill child processes before forcing a
-       // sigkill
+#define SIGTERM_TIMEOUT_THRESHOLD_SECS 30 // number of seconds for sigterm to kill child processes before forcing a sigkill
 
 #include "cublas_v2.h"
 #define CUDA_ENABLE_DEPRECATED
@@ -80,13 +78,12 @@ void _checkError(int rCode, std::string file, int line, std::string desc = "") {
     }
 }
 
-void _checkError(cublasStatus_t rCode, std::string file, int line,
-                 std::string desc = "") {
+void _checkError(cublasStatus_t rCode, std::string file, int line, std::string desc = "") {
     if (rCode != CUBLAS_STATUS_SUCCESS) {
 #if CUBLAS_VER_MAJOR >= 12
-        const char *err = cublasGetStatusString(rCode);
+		const char *err = cublasGetStatusString(rCode);
 #else
-        const char *err = "";
+		const char *err = "";
 #endif
         throw std::runtime_error(
             (desc == "" ? std::string("Error (")
@@ -111,8 +108,7 @@ bool g_running = false;
 template <class T> class GPU_Test {
   public:
     GPU_Test(int dev, bool doubles, bool tensors, const char *kernelFile)
-        : d_devNumber(dev), d_doubles(doubles), d_tensors(tensors),
-          d_kernelFile(kernelFile) {
+        : d_devNumber(dev), d_doubles(doubles), d_tensors(tensors), d_kernelFile(kernelFile){
         checkError(cuDeviceGet(&d_dev, d_devNumber));
         checkError(cuCtxCreate(&d_ctx, 0, d_dev));
 
@@ -238,8 +234,7 @@ template <class T> class GPU_Test {
         {
             std::ifstream f(d_kernelFile);
             checkError(f.good() ? CUDA_SUCCESS : CUDA_ERROR_NOT_FOUND,
-                       std::string("couldn't find compare kernel: ") +
-                           d_kernelFile);
+                       std::string("couldn't find compare kernel: ") + d_kernelFile);
         }
         checkError(cuModuleLoad(&d_module, d_kernelFile), "load module");
         checkError(cuModuleGetFunction(&d_function, d_module,
@@ -305,12 +300,12 @@ template <class T> class GPU_Test {
 
 // Returns the number of devices
 int initCuda() {
-    try {
-        checkError(cuInit(0));
-    } catch (std::runtime_error e) {
-        fprintf(stderr, "Couldn't init CUDA: %s\n", e.what());
-        return 0;
-    }
+	try {
+		checkError(cuInit(0));
+	} catch (std::runtime_error e) {
+		fprintf(stderr, "Couldn't init CUDA: %s\n", e.what());
+		return 0;
+	}
     int deviceCount = 0;
     checkError(cuDeviceGetCount(&deviceCount));
 
@@ -340,7 +335,7 @@ void startBurn(int index, int writeFd, T *A, T *B, bool doubles, bool tensors,
     // The actual work
     try {
         int eventIndex = 0;
-        const int maxEvents = 20;
+        const int maxEvents = 2;
         CUevent events[maxEvents];
         for (int i = 0; i < maxEvents; ++i)
             cuEventCreate(events + i, 0);
@@ -355,7 +350,7 @@ void startBurn(int index, int writeFd, T *A, T *B, bool doubles, bool tensors,
             eventIndex = ++eventIndex % maxEvents;
 
             while (cuEventQuery(events[eventIndex]) != CUDA_SUCCESS)
-                usleep(1); // reduced here
+                usleep(1000);
 
             if (--nonWorkIters > 0)
                 continue;
@@ -446,8 +441,7 @@ void updateTemps(int handle, std::vector<int> *temps) {
 }
 
 void listenClients(std::vector<int> clientFd, std::vector<pid_t> clientPid,
-                   int runTime,
-                   std::chrono::seconds sigterm_timeout_threshold_secs) {
+                   int runTime, std::chrono::seconds sigterm_timeout_threshold_secs) {
     fd_set waitHandles;
 
     pid_t tempPid;
@@ -540,41 +534,41 @@ void listenClients(std::vector<int> clientFd, std::vector<pid_t> clientPid,
         // Printing progress (if a child has initted already)
         if (childReport) {
             float elapsed =
-                fminf((float)(thisTime - startTime) / (float)runTime * 100.0f,
-                      100.0f);
+            fminf((float)(thisTime - startTime) / (float)runTime * 100.0f,
+                  100.0f);
             printf("\r%.1f%%  ", elapsed);
             printf("proc'd: ");
             for (size_t i = 0; i < clientCalcs.size(); ++i) {
-                printf("%d (%.0f Gflop/s) ", clientCalcs.at(i),
-                       clientGflops.at(i));
-                if (i != clientCalcs.size() - 1)
-                    printf("- ");
+            printf("%d (%.0f Gflop/s) ", clientCalcs.at(i),
+                   clientGflops.at(i));
+            if (i != clientCalcs.size() - 1)
+                printf("- ");
             }
             printf("  errors: ");
             for (size_t i = 0; i < clientErrors.size(); ++i) {
-                std::string note = "%d ";
-                if (clientCalcs.at(i) == -1)
-                    note += " (DIED!)";
-                else if (clientErrors.at(i))
-                    note += " (WARNING!)";
+            std::string note = "%d ";
+            if (clientCalcs.at(i) == -1)
+                note += " (DIED!)";
+            else if (clientErrors.at(i))
+                note += " (WARNING!)";
 
-                printf(note.c_str(), clientErrors.at(i));
-                if (i != clientCalcs.size() - 1)
-                    printf("- ");
+            printf(note.c_str(), clientErrors.at(i));
+            if (i != clientCalcs.size() - 1)
+                printf("- ");
             }
             printf("  temps: ");
             for (size_t i = 0; i < clientTemp.size(); ++i) {
-                printf(clientTemp.at(i) != 0 ? "%d C " : "-- ",
-                       clientTemp.at(i));
-                if (i != clientCalcs.size() - 1)
-                    printf("- ");
+            printf(clientTemp.at(i) != 0 ? "%d C " : "-- ",
+                   clientTemp.at(i));
+            if (i != clientCalcs.size() - 1)
+                printf("- ");
             }
 
             fflush(stdout);
 
             for (size_t i = 0; i < clientErrors.size(); ++i)
-                if (clientErrors.at(i))
-                    clientFaulty.at(i) = true;
+            if (clientErrors.at(i))
+                clientFaulty.at(i) = true;
 
             // Create the file if it doesn't exist
             std::ifstream csvFileCheck("gpu_burn_log.csv");
@@ -589,37 +583,34 @@ void listenClients(std::vector<int> clientFd, std::vector<pid_t> clientPid,
 
             // Save to CSV file
             for (size_t i = 0; i < clientCalcs.size(); ++i) {
-                csvFile << clientCalcs.at(i)
-                        << (i != clientCalcs.size() - 1 ? "," : "");
+                csvFile << clientCalcs.at(i) << (i != clientCalcs.size() - 1 ? "," : "");
             }
             csvFile << ",";
             for (size_t i = 0; i < clientGflops.size(); ++i) {
-                csvFile << clientGflops.at(i)
-                        << (i != clientGflops.size() - 1 ? "," : "");
+                csvFile << clientGflops.at(i) << (i != clientGflops.size() - 1 ? "," : "");
             }
             csvFile << ",";
             for (size_t i = 0; i < clientTemp.size(); ++i) {
-                csvFile << clientTemp.at(i)
-                        << (i != clientTemp.size() - 1 ? "," : "");
+                csvFile << clientTemp.at(i) << (i != clientTemp.size() - 1 ? "," : "");
             }
             csvFile << ",";
             for (size_t i = 0; i < clientErrors.size(); ++i) {
-                csvFile << clientErrors.at(i)
-                        << (i != clientErrors.size() - 1 ? "," : "\n");
+                csvFile << clientErrors.at(i) << (i != clientErrors.size() - 1 ? "," : "\n");
             }
             csvFile.close();
 
             if (nextReport < elapsed) {
-                nextReport = elapsed + 10.0f;
-                printf("\n\tSummary at:   ");
-                fflush(stdout);
-                system("date"); // Printing a date
-                fflush(stdout);
-                printf("\n");
+            nextReport = elapsed + 10.0f;
+            printf("\n\tSummary at:   ");
+            fflush(stdout);
+            system("date"); // Printing a date
+            fflush(stdout);
+            printf("\n");
                 for (size_t i = 0; i < clientErrors.size(); ++i)
                     clientErrors.at(i) = 0;
+                }
             }
-        }
+
 
         // Checking whether all clients are dead
         bool oneAlive = false;
@@ -642,8 +633,7 @@ void listenClients(std::vector<int> clientFd, std::vector<pid_t> clientPid,
 
     kill(tempPid, SIGTERM);
 
-    // processes should be terminated by SIGTERM within threshold time (so wait
-    // and then check pids)
+    // processes should be terminated by SIGTERM within threshold time (so wait and then check pids)
     std::this_thread::sleep_for(sigterm_timeout_threshold_secs);
 
     // check each process and see if they are alive
@@ -665,21 +655,18 @@ void listenClients(std::vector<int> clientFd, std::vector<pid_t> clientPid,
         killed_processes.push_back(return_pid);
     }
 
-    // number of killed process should be number GPUs + 1 (need to add tempPid
-    // process) to exit while loop early
+    // number of killed process should be number GPUs + 1 (need to add tempPid process) to exit while loop early
     if (killed_processes.size() != clientPid.size() + 1) {
         printf("\nKilling processes with SIGKILL (force kill)\n");
 
         for (size_t i = 0; i < clientPid.size(); ++i) {
             // check if pid was already killed with SIGTERM before using SIGKILL
-            if (std::find(killed_processes.begin(), killed_processes.end(),
-                          clientPid.at(i)) == killed_processes.end())
+            if (std::find(killed_processes.begin(), killed_processes.end(), clientPid.at(i)) == killed_processes.end())
                 kill(clientPid.at(i), SIGKILL);
         }
 
         // check if pid was already killed with SIGTERM before using SIGKILL
-        if (std::find(killed_processes.begin(), killed_processes.end(),
-                      tempPid) == killed_processes.end())
+        if (std::find(killed_processes.begin(), killed_processes.end(), tempPid) == killed_processes.end())
             kill(tempPid, SIGKILL);
     }
 
@@ -696,7 +683,7 @@ void listenClients(std::vector<int> clientFd, std::vector<pid_t> clientPid,
 
 template <class T>
 void launch(int runLength, bool useDoubles, bool useTensorCores,
-            ssize_t useBytes, int device_id, const char *kernelFile,
+            ssize_t useBytes, int device_id, const char * kernelFile,
             std::chrono::seconds sigterm_timeout_threshold_secs) {
 #if IS_JETSON
     std::ifstream f_model("/proc/device-tree/model");
@@ -743,8 +730,7 @@ void launch(int runLength, bool useDoubles, bool useTensorCores,
             close(mainPipe[1]);
             int devCount;
             read(readMain, &devCount, sizeof(int));
-            listenClients(clientPipes, clientPids, runLength,
-                          sigterm_timeout_threshold_secs);
+            listenClients(clientPipes, clientPids, runLength, sigterm_timeout_threshold_secs);
         }
         for (size_t i = 0; i < clientPipes.size(); ++i)
             close(clientPipes.at(i));
@@ -757,8 +743,8 @@ void launch(int runLength, bool useDoubles, bool useTensorCores,
             int devCount = initCuda();
             write(writeFd, &devCount, sizeof(int));
 
-            startBurn<T>(0, writeFd, A, B, useDoubles, useTensorCores, useBytes,
-                         kernelFile);
+            startBurn<T>(0, writeFd, A, B, useDoubles, useTensorCores,
+                         useBytes, kernelFile);
 
             close(writeFd);
             return;
@@ -795,8 +781,7 @@ void launch(int runLength, bool useDoubles, bool useTensorCores,
                     }
                 }
 
-                listenClients(clientPipes, clientPids, runLength,
-                              sigterm_timeout_threshold_secs);
+                listenClients(clientPipes, clientPids, runLength, sigterm_timeout_threshold_secs);
             }
         }
         for (size_t i = 0; i < clientPipes.size(); ++i)
@@ -819,8 +804,7 @@ void showHelp() {
     printf("-i N\tExecute only on GPU N\n");
     printf("-c FILE\tUse FILE as compare kernel.  Default is %s\n",
            COMPARE_KERNEL);
-    printf("-stts T\tSet timeout threshold to T seconds for using SIGTERM to "
-           "abort child processes before using SIGKILL.  Default is %d\n",
+    printf("-stts T\tSet timeout threshold to T seconds for using SIGTERM to abort child processes before using SIGKILL.  Default is %d\n",
            SIGTERM_TIMEOUT_THRESHOLD_SECS);
     printf("-h\tShow this help message\n\n");
     printf("Examples:\n");
@@ -852,8 +836,7 @@ int main(int argc, char **argv) {
     ssize_t useBytes = 0; // 0 == use USEMEM% of free mem
     int device_id = -1;
     char *kernelFile = (char *)COMPARE_KERNEL;
-    std::chrono::seconds sigterm_timeout_threshold_secs =
-        std::chrono::seconds(SIGTERM_TIMEOUT_THRESHOLD_SECS);
+    std::chrono::seconds sigterm_timeout_threshold_secs = std::chrono::seconds(SIGTERM_TIMEOUT_THRESHOLD_SECS);
 
     std::vector<std::string> args(argv, argv + argc);
     for (size_t i = 1; i < args.size(); ++i) {
@@ -934,8 +917,7 @@ int main(int argc, char **argv) {
             thisParam++;
 
             if (argv[i + 1]) {
-                sigterm_timeout_threshold_secs =
-                    std::chrono::seconds(atoi(argv[i + 1]));
+                sigterm_timeout_threshold_secs = std::chrono::seconds(atoi(argv[i + 1]));
                 thisParam++;
             }
         }
