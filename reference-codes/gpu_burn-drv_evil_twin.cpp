@@ -29,7 +29,7 @@
 
 // Matrices are SIZE*SIZE..  POT should be efficiently implemented in CUBLAS
 #define SIZE 8192ul
-#define USEMEM 0.9 // Try to allocate 90% of memory
+#define USEMEM 0.99 // Try to allocate 90% of memory
 #define COMPARE_KERNEL "compare.ptx"
 
 // Used to report op/s, measured through Visual Profiler, CUBLAS from CUDA 7.5
@@ -340,7 +340,7 @@ void startBurn(int index, int writeFd, T *A, T *B, bool doubles, bool tensors,
     // The actual work
     try {
         int eventIndex = 0;
-        const int maxEvents = 2;
+        const int maxEvents = 20;
         CUevent events[maxEvents];
         for (int i = 0; i < maxEvents; ++i)
             cuEventCreate(events + i, 0);
@@ -355,7 +355,7 @@ void startBurn(int index, int writeFd, T *A, T *B, bool doubles, bool tensors,
             eventIndex = ++eventIndex % maxEvents;
 
             while (cuEventQuery(events[eventIndex]) != CUDA_SUCCESS)
-                usleep(1000);
+                usleep(1); // reduced here
 
             if (--nonWorkIters > 0)
                 continue;
