@@ -25,6 +25,7 @@ override LDFLAGS  += -Wl,-rpath=${CUDAPATH}/lib64
 override LDFLAGS  += -Wl,-rpath=${CUDAPATH}/lib
 override LDFLAGS  += -lcublas
 override LDFLAGS  += -lcudart
+override LDFLAGS  += -lnvidia-ml
 
 COMPUTE      ?= 75
 CUDA_VERSION ?= 11.8.0

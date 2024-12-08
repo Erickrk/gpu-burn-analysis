@@ -3,7 +3,7 @@ import os
 import matplotlib.pyplot as plt
 
 # Define the path to the folder containing the CSV files
-csv_folder_path = 'c:/Users/erick/Documents/kaust/gpu-burn-analysis/exploration/normal_behavior'
+csv_folder_path = 'C:\Users\silvae\Documents\GitHub\gpu-burn-analysis\exploration\normal_behavior'
 
 # Initialize an empty DataFrame to store all temperature data
 all_data = pd.DataFrame()

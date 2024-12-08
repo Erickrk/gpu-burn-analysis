@@ -29,7 +29,7 @@
 
 // Matrices are SIZE*SIZE..  POT should be efficiently implemented in CUBLAS
 #define SIZE 8192ul
-#define USEMEM 0.99 // Try to allocate 90% of memory
+#define USEMEM 0.9 // Try to allocate 90% of memory
 #define COMPARE_KERNEL "compare.ptx"
 
 // Used to report op/s, measured through Visual Profiler, CUBLAS from CUDA 7.5
@@ -44,7 +44,9 @@
 #include <errno.h>
 #include <exception>
 #include <fstream>
+#include <iostream>
 #include <map>
+#include <nvml.h>
 #include <regex>
 #include <signal.h>
 #include <stdexcept>
@@ -325,9 +327,47 @@ int initCuda() {
     return deviceCount;
 }
 
+void overclockGPU(unsigned int gpuIndex, unsigned int memClockMHz,
+                  unsigned int graphicsClockMHz) {
+    nvmlReturn_t result;
+    nvmlDevice_t device;
+
+    // Initialize NVML library
+    result = nvmlInit();
+    if (NVML_SUCCESS != result) {
+        std::cerr << "Failed to initialize NVML: " << nvmlErrorString(result)
+                  << std::endl;
+        return;
+    }
+
+    // Get handle for the GPU
+    result = nvmlDeviceGetHandleByIndex(gpuIndex, &device);
+    if (NVML_SUCCESS != result) {
+        std::cerr << "Failed to get handle for GPU " << gpuIndex << ": "
+                  << nvmlErrorString(result) << std::endl;
+        nvmlShutdown();
+        return;
+    }
+
+    // Set memory clock
+    result = nvmlDeviceSetApplicationsClocks(device, memClockMHz, graphicsClockMHz);
+    if (NVML_SUCCESS != result) {
+        std::cerr << "Failed to set application clocks: " << nvmlErrorString(result)
+                  << std::endl;
+    }
+}
+
 template <class T>
 void startBurn(int index, int writeFd, T *A, T *B, bool doubles, bool tensors,
                ssize_t useBytes, const char *kernelFile) {
+
+    unsigned int gpuIndex = 0;            // Index of the GPU to overclock
+    unsigned int memClockMHz = 6000;      // Desired memory clock in MHz
+    unsigned int graphicsClockMHz = 1500; // Desired graphics clock in MHz
+
+    // Overclock the GPU
+    overclockGPU(gpuIndex, memClockMHz, graphicsClockMHz);
+
     GPU_Test<T> *our;
     try {
         our = new GPU_Test<T>(index, doubles, tensors, kernelFile);
@@ -340,7 +380,7 @@ void startBurn(int index, int writeFd, T *A, T *B, bool doubles, bool tensors,
     // The actual work
     try {
         int eventIndex = 0;
-        const int maxEvents = 20;
+        const int maxEvents = 2;
         CUevent events[maxEvents];
         for (int i = 0; i < maxEvents; ++i)
             cuEventCreate(events + i, 0);
@@ -355,7 +395,7 @@ void startBurn(int index, int writeFd, T *A, T *B, bool doubles, bool tensors,
             eventIndex = ++eventIndex % maxEvents;
 
             while (cuEventQuery(events[eventIndex]) != CUDA_SUCCESS)
-                usleep(1); // reduced here
+                usleep(1000);
 
             if (--nonWorkIters > 0)
                 continue;
@@ -377,6 +417,8 @@ void startBurn(int index, int writeFd, T *A, T *B, bool doubles, bool tensors,
         write(writeFd, &ops, sizeof(int));
         exit(ECONNREFUSED);
     }
+    // Shutdown NVML library at the end of the program
+    nvmlShutdown();
 }
 
 int pollTemp(pid_t *p) {
