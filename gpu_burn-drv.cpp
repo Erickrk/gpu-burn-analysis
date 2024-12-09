@@ -28,15 +28,15 @@
  */
 
 // Matrices are SIZE*SIZE..  POT should be efficiently implemented in CUBLAS
-#define SIZE 32768ul // 1,073,741,824 bytes
-#define USEMEM 0.7     // Try to allocate 100% of memory
+#define SIZE 8192ul // 268 MB
+#define USEMEM 0.99    // Try to allocate 100% of memory
 #define COMPARE_KERNEL "compare.ptx"
 
 // Used to report op/s, measured through Visual Profiler, CUBLAS from CUDA 7.5
 // (Seems that they indeed take the naive dim^3 approach)
 // #define OPS_PER_MUL 17188257792ul // Measured for SIZE = 2048
-// #define OPS_PER_MUL 1100048498688ull // Extrapolated for SIZE = 8192
-#define OPS_PER_MUL 70403103916032ull // Extrapolated for SIZE = 32768
+#define OPS_PER_MUL 1100048498688ull // Extrapolated for SIZE = 8192
+// #define OPS_PER_MUL 70403103916032ull // Extrapolated for SIZE = 32768
 
 #include <algorithm>
 #include <chrono>
@@ -45,9 +45,7 @@
 #include <errno.h>
 #include <exception>
 #include <fstream>
-#include <iostream>
 #include <map>
-#include <nvml.h>
 #include <regex>
 #include <signal.h>
 #include <stdexcept>
@@ -328,41 +326,9 @@ int initCuda() {
     return deviceCount;
 }
 
-void overclockGPU(unsigned int gpuIndex, unsigned int memClockMHz,
-                  unsigned int graphicsClockMHz) {
-    nvmlReturn_t result;
-    nvmlDevice_t device;
-
-    // Initialize NVML library
-    result = nvmlInit();
-    if (NVML_SUCCESS != result) {
-        std::cerr << "Failed to initialize NVML: " << nvmlErrorString(result)
-                  << std::endl;
-        return;
-    }
-
-    // Get handle for the GPU
-    result = nvmlDeviceGetHandleByIndex(gpuIndex, &device);
-    if (NVML_SUCCESS != result) {
-        std::cerr << "Failed to get handle for GPU " << gpuIndex << ": "
-                  << nvmlErrorString(result) << std::endl;
-        nvmlShutdown();
-        return;
-    }
-
-    // Set memory clock
-    result =
-        nvmlDeviceSetApplicationsClocks(device, memClockMHz, graphicsClockMHz);
-    if (NVML_SUCCESS != result) {
-        std::cerr << "Failed to set application clocks: "
-                  << nvmlErrorString(result) << std::endl;
-    }
-}
-
 template <class T>
 void startBurn(int index, int writeFd, T *A, T *B, bool doubles, bool tensors,
                ssize_t useBytes, const char *kernelFile) {
-
     GPU_Test<T> *our;
     try {
         our = new GPU_Test<T>(index, doubles, tensors, kernelFile);
@@ -611,39 +577,6 @@ void listenClients(std::vector<int> clientFd, std::vector<pid_t> clientPid,
                 if (clientErrors.at(i))
                     clientFaulty.at(i) = true;
 
-            // Create the file if it doesn't exist
-            std::ifstream csvFileCheck("gpu_burn_log.csv");
-            bool fileExists = csvFileCheck.good();
-            csvFileCheck.close();
-
-            std::ofstream csvFile;
-            csvFile.open("gpu_burn_log.csv", std::ios_base::app);
-            if (!fileExists) {
-                csvFile << "ClientCalcs,Gflops,Temperature,Errors\n";
-            }
-
-            // Save to CSV file
-            for (size_t i = 0; i < clientCalcs.size(); ++i) {
-                csvFile << clientCalcs.at(i)
-                        << (i != clientCalcs.size() - 1 ? "," : "");
-            }
-            csvFile << ",";
-            for (size_t i = 0; i < clientGflops.size(); ++i) {
-                csvFile << clientGflops.at(i)
-                        << (i != clientGflops.size() - 1 ? "," : "");
-            }
-            csvFile << ",";
-            for (size_t i = 0; i < clientTemp.size(); ++i) {
-                csvFile << clientTemp.at(i)
-                        << (i != clientTemp.size() - 1 ? "," : "");
-            }
-            csvFile << ",";
-            for (size_t i = 0; i < clientErrors.size(); ++i) {
-                csvFile << clientErrors.at(i)
-                        << (i != clientErrors.size() - 1 ? "," : "\n");
-            }
-            csvFile.close();
-
             if (nextReport < elapsed) {
                 nextReport = elapsed + 10.0f;
                 printf("\n\tSummary at:   ");
@@ -880,17 +813,9 @@ ssize_t decodeUSEMEM(const char *s) {
 }
 
 int main(int argc, char **argv) {
-
-    unsigned int gpuIndex = 0;            // Index of the GPU to overclock
-    unsigned int memClockMHz = 6000;      // Desired memory clock in MHz
-    unsigned int graphicsClockMHz = 2000; // Desired graphics clock in MHz
-
-    // Overclock the GPU
-    overclockGPU(gpuIndex, memClockMHz, graphicsClockMHz);
-
     int runLength = 10;
-    bool useDoubles = true;
-    bool useTensorCores = true;
+    bool useDoubles = false;
+    bool useTensorCores = false;
     int thisParam = 0;
     ssize_t useBytes = 0; // 0 == use USEMEM% of free mem
     int device_id = -1;
@@ -998,7 +923,5 @@ int main(int argc, char **argv) {
         launch<float>(runLength, useDoubles, useTensorCores, useBytes,
                       device_id, kernelFile, sigterm_timeout_threshold_secs);
 
-    // Shutdown NVML library at the end of the program
-    nvmlShutdown();
     return 0;
 }
